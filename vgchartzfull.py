@@ -1,7 +1,9 @@
 from bs4 import BeautifulSoup, element
 import urllib
+import urllib.request
 import pandas as pd
 import numpy as np
+import time
 
 pages = 19
 rec_count = 0
@@ -20,6 +22,7 @@ sales_jp = []
 sales_ot = []
 sales_gl = []
 
+
 urlhead = 'http://www.vgchartz.com/gamedb/?page='
 urltail = '&console=&region=All&developer=&publisher=&genre=&boxart=Both&ownership=Both'
 urltail += '&results=1000&order=Sales&showtotalsales=0&showtotalsales=1&showpublisher=0'
@@ -27,16 +30,35 @@ urltail += '&showpublisher=1&showvgchartzscore=0&shownasales=1&showdeveloper=1&s
 urltail += '&showpalsales=0&showpalsales=1&showreleasedate=1&showuserscore=1&showjapansales=1'
 urltail += '&showlastupdate=0&showothersales=1&showgenre=1&sort=GL'
 
+
+
+def individualGame(url_to_game):
+    print("Obtaining Genre information from: "+url_to_game)
+    site_raw = urllib.request.urlopen(url_to_game).read()
+    sub_soup = BeautifulSoup(site_raw, "html.parser")
+    # again, the info box is inconsistent among games so we
+    # have to find all the h2 and traverse from that to the genre name
+    h2s = sub_soup.find("div", {"id": "gameGenInfoBox"}).find_all('h2')
+    # make a temporary tag here to search for the one that contains
+    # the word "Genre"
+    temp_tag = element.Tag
+    for h2 in h2s:
+        if h2.string == 'Genre':
+            temp_tag = h2
+    genre.append(temp_tag.next_sibling.string)
+
+
 for page in range(1, pages):
     surl = urlhead + str(page) + urltail
     r = urllib.request.urlopen(surl).read()
     soup = BeautifulSoup(r)
     print(f"Page: {page}")
-
+    
     # vgchartz website is really weird so we have to search for
     # <a> tags with game urls
     game_tags = list(filter(
-        lambda x: x.attrs['href'].startswith('http://www.vgchartz.com/game/'),
+        #Fixed an error with the startswith because now starts with https, not with http
+        lambda x: x.attrs['href'].startswith('https://www.vgchartz.com/game/'),
         # discard the first 10 elements because those
         # links are in the navigation bar
         soup.find_all("a")
@@ -46,15 +68,30 @@ for page in range(1, pages):
 
         # add name to list
         gname.append(" ".join(tag.string.split()))
-        print(f"{rec_count + 1} Fetch data for game {gname[-1]}")
+        print(f"\n{rec_count + 1} Fetch data for game {gname[-1]}")
+        #Hasta aqui funciona
 
         # get different attributes
         # traverse up the DOM tree
         data = tag.parent.parent.find_all("td")
-        rank.append(np.int32(data[0].string))
-        platform.append(data[3].find('img').attrs['alt'])
-        publisher.append(data[4].string)
-        developer.append(data[5].string)
+       # print("Found data: " + data)
+
+        currentRank = np.int32(data[0].string)
+        rank.append(currentRank)
+        print("Found rank: " + str(currentRank))
+
+        currentPlatform = data[3].find('img').attrs['alt']
+        platform.append(currentPlatform)
+        print("Found platform: " + currentPlatform)
+
+        currentPublisher = data[4].string
+        publisher.append(currentPublisher)
+        print("Found publisher: " + currentPublisher)
+
+        currentDeveloper = data[5].string
+        developer.append(currentDeveloper)
+        print("Found developer: " + currentDeveloper)
+
         critic_score.append(
             float(data[6].string) if
             not data[6].string.startswith("N/A") else np.nan)
@@ -86,22 +123,28 @@ for page in range(1, pages):
             else:
                 year_to_add = np.int32("20" + release_year)
             year.append(year_to_add)
+        try:
+            # go to every individual website to get genre info
+            url_to_game = tag.attrs['href']
+            individualGame(url_to_game)            
+        except Exception as exc:
+            print("Individual page access error")
+            print(exc)
+            notChecked = 0
+            while notChecked is 0:
+                try:
+                    x = 10
+                    print("Waiting "+str(x)+" seconds and retrying...")
+                    time.sleep(x)
+                    individualGame(url_to_game)
+                    notChecked = 1
+                except Exception as exc:
+                    notChecked = 0
 
-        # go to every individual website to get genre info
-        url_to_game = tag.attrs['href']
-        site_raw = urllib.request.urlopen(url_to_game).read()
-        sub_soup = BeautifulSoup(site_raw, "html.parser")
-        # again, the info box is inconsistent among games so we
-        # have to find all the h2 and traverse from that to the genre name
-        h2s = sub_soup.find("div", {"id": "gameGenInfoBox"}).find_all('h2')
-        # make a temporary tag here to search for the one that contains
-        # the word "Genre"
-        temp_tag = element.Tag
-        for h2 in h2s:
-            if h2.string == 'Genre':
-                temp_tag = h2
-        genre.append(temp_tag.next_sibling.string)
-
+        #Modify this parameter to change the waiting time between pettitions
+        x = 7
+        print("Sleeping "+str(x)+" seconds to avoid HTTP 429 rate error")
+        time.sleep(x)
         rec_count += 1
 
 columns = {
@@ -128,3 +171,5 @@ df = df[[
     'Publisher', 'Developer', 'Critic_Score', 'User_Score',
     'NA_Sales', 'PAL_Sales', 'JP_Sales', 'Other_Sales', 'Global_Sales']]
 df.to_csv("vgsales.csv", sep=",", encoding='utf-8', index=False)
+
+
